@@ -17,7 +17,7 @@ const Navbar = () => {
   const navItems = [
     { path: '/', label: 'Home', icon: Home },
     { path: '/labs/experiment1', label: 'Computer Networks', icon: Network },
-    { path: '/labs/experiment2', label: 'Theory of Computation', icon: Brain }
+    { path: '/labs/experiment21', label: 'Theory of Computation', icon: Brain }
   ];
 
   return (
@@ -101,3 +101,4 @@ const Navbar = () => {
 };
 
 export default Navbar;
+
