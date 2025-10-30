@@ -23,8 +23,9 @@ const experiments = [
     rpath: 'experiment2',
     render: (
       <div>
-      <DFAExperiment />
-      <TheoryRenderer theoryText={`The deterministic finite automaton (DFA) accepts all strings over the alphabet {A, B} that start with the letter A and end with the letter B. It consists of four distinct states: S0, the start state; S1, an intermediate state; S2, the accepting state; and Dead, which rejects invalid strings.
+        <DFAExperiment />
+        <div style={{}}>
+          <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', background: '#222', color: '#eee', padding: 16, borderRadius: 8, marginTop: '1vh' }}>{`The deterministic finite automaton (DFA) accepts all strings over the alphabet {A, B} that start with the letter A and end with the letter B. It consists of four distinct states: S0, the start state; S1, an intermediate state; S2, the accepting state; and Dead, which rejects invalid strings.
 
 The transitions are defined to enforce the conditions of starting with A and ending with B. From the start state S0, if the input is A, the DFA moves to S1, marking that the first character is valid. If the input is B, it moves to the Dead state, since the string does not begin properly.
 
@@ -36,23 +37,13 @@ The Dead state acts as a sink state that absorbs any string that violates the co
 
 This design successfully recognizes strings like AB, AAB, AAAB, ABB, and ABAB—all of which start with A and end with B. It rejects the empty string, strings that don't begin with A, or end with B, such as B, A, and ABA.
 
-The DFA is minimal and efficient, using only four states to capture all necessary behaviors. It processes inputs in linear time with constant space, tracking only the current state. The transitions precisely reflect the constraints on the string’s start and end, ensuring correctness.`}/>
+The DFA is minimal and efficient, using only four states to capture all necessary behaviors. It processes inputs in linear time with constant space, tracking only the current state. The transitions precisely reflect the constraints on the string’s start and end, ensuring correctness.`}</pre>
+        </div>
       </div>
     ),
   },
   // Add more experiments similarly
 ];
-
-function TheoryRenderer({ theoryText }) {
-  return (
-    <div style={{}}>
-      <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', background: '#222', color: '#eee', padding: 16, borderRadius: 8, marginTop:'1vh' }}>
-        {theoryText}
-      </pre>
-    </div>
-  );
-}
-
 
 function DFAExperiment() {
   const STATE_RADIUS = 0.5;
