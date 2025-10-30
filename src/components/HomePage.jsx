@@ -9,14 +9,14 @@ const Home = () => {
       icon: Network,
       title: 'Computer Networks',
       description: 'Interactive 3D network topology visualization with real-time data flow simulation',
-      link: '/computer-networks',
+      link: '/labs/experiment1',
       color: 'linear-gradient(135deg, #667eea, #764ba2)'
     },
     {
       icon: Brain,
       title: 'Theory of Computation',
       description: 'Finite automata, Turing machines, DFA simulator, and computational complexity visualizations',
-      link: '/theory-of-computation',
+      link: '/labs/experiment21',
       color: 'linear-gradient(135deg, #f093fb, #f5576c)'
     }
   ];
@@ -70,7 +70,7 @@ const Home = () => {
               Computer Networks
               <ArrowRight size={16} />
             </Link>
-            <Link to="/labs/experiment2" className="btn btn-outline-light d-flex align-items-center gap-2 px-4 py-2 rounded-3 fw-semibold">
+            <Link to="/labs/experiment21" className="btn btn-outline-light d-flex align-items-center gap-2 px-4 py-2 rounded-3 fw-semibold">
               <Brain size={20} />
               Theory of Computation
             </Link>
@@ -172,3 +172,4 @@ const Home = () => {
 };
 
 export default Home;
+
