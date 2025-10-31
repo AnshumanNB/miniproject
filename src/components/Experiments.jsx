@@ -1,6 +1,7 @@
 import { div } from "framer-motion/client";
 import React, { useRef, useEffect, useState } from "react";
 import * as THREE from 'three';
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 const experiments = [
   {
@@ -27,7 +28,7 @@ const experiments = [
     path: '/labs/experiment3',
     rpath: 'experiment3',
     render: (
-      <StopAndWaitARQ />
+      <StopAndWaitVertical />
     ),
   },
   {
@@ -83,20 +84,20 @@ function NetworkTopology3D() {
 
     const nodes = [];
 
-    const createLabels = (labelText, position) => {
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-      ctx.font = "Bold 24px Arial";
-      ctx.fillStyle = "white";
-      ctx.fillText(labelText, 0, 24);
-      const texture = new THREE.CanvasTexture(canvas);
-      const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
-      const sprite = new THREE.Sprite(spriteMaterial);
-      sprite.scale.set(6, 3, 3);
-      sprite.position.copy(position);
-      scene.add(sprite);
-      return sprite;
-    };
+    // const createLabels = (labelText, position) => {
+    //   const canvas = document.createElement("canvas");
+    //   const ctx = canvas.getContext("2d");
+    //   ctx.font = "Bold 24px Arial";
+    //   ctx.fillStyle = "white";
+    //   ctx.fillText(labelText, 0, 24);
+    //   const texture = new THREE.CanvasTexture(canvas);
+    //   const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+    //   const sprite = new THREE.Sprite(spriteMaterial);
+    //   sprite.scale.set(6, 3, 3);
+    //   sprite.position.copy(position);
+    //   scene.add(sprite);
+    //   return sprite;
+    // };
 
     const createTopology = (type) => {
       scene.children = [];
@@ -112,7 +113,7 @@ function NetworkTopology3D() {
             node.position.set(i * 2 - 4, 0, 0);
             scene.add(node);
             nodes.push(node);
-            createLabels("Node " + i, node.position.clone().add(new THREE.Vector3(0, 0, 0)));
+            //createLabels("Node " + i, node.position.clone().add(new THREE.Vector3(0, 0, 0)));
           }
           for (let i = 0; i < nodes.length - 1; i++) {
             const material = new THREE.LineBasicMaterial({ color: 0xffffff });
@@ -130,7 +131,7 @@ function NetworkTopology3D() {
             node.position.set(Math.cos(angle) * 4, Math.sin(angle) * 4, 0);
             scene.add(node);
             nodes.push(node);
-            createLabels("Node " + i, node.position.clone().add(new THREE.Vector3(0, 0, 0)));
+            //createLabels("Node " + i, node.position.clone().add(new THREE.Vector3(0, 0, 0)));
             // Connect to center
             const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff });
             const lineGeo = new THREE.BufferGeometry().setFromPoints([center, node.position]);
@@ -145,7 +146,7 @@ function NetworkTopology3D() {
             node.position.set(Math.cos(angle) * 5, Math.sin(angle) * 5, 0);
             scene.add(node);
             nodes.push(node);
-            createLabels("Node " + i, node.position.clone().add(new THREE.Vector3(0, 0, 0)));
+            //createLabels("Node " + i, node.position.clone().add(new THREE.Vector3(0, 0, 0)));
           }
           // Connect in ring
           for (let i = 0; i < nodes.length; i++) {
@@ -168,7 +169,7 @@ function NetworkTopology3D() {
             node.position.set(v[0]*3, v[1]*3, v[2]*3);
             scene.add(node);
             nodes.push(node);
-            createLabels("Node " + i, node.position.clone().add(new THREE.Vector3(0, 0, 0)));
+            //createLabels("Node " + i, node.position.clone().add(new THREE.Vector3(0, 0, 0)));
           }
           // Connect edges
           const edgesToConnect = [
@@ -475,410 +476,1223 @@ This visual model demonstrates how efficient and reliable data transfer is achie
   );
 }
 
-function StopAndWaitARQ() {
-  const [frameNumber, setFrameNumber] = useState(0); // 0 or 1 sequence number
-  const [status, setStatus] = useState("Ready to send Frame 0");
-  const [animating, setAnimating] = useState(false);
-  const [waitingAck, setWaitingAck] = useState(false);
-  const timeoutRef = useRef(null);
+function StopAndWaitVertical() {
+  const [running, setRunning] = useState(false);
+  const [currentScene, setCurrentScene] = useState(0);
+  const [sceneState, setSceneState] = useState(0); // progress inside scene (not used directly here)
+  const [explainText, setExplainText] = useState(
+    `Press Step to walk one event at a time.\n\nVisual summary:\n1) Success: Sender sends packet → Receiver receives → sends ACK → Sender receives ACK → next packet.\n2) Timeout: ACK not received within timeout → Sender retransmits packet.\n3) Lost: Packet lost in transit → no ACK → timeout → retransmit.`
+  );
 
-  // Probability to simulate ACK loss (20%)
-  const ACK_LOSS_PROBABILITY = 0.2;
+  // Refs for animation
+  const rafId = useRef(null);
+  const sceneStart = useRef(null);
 
-  const sendFrame = () => {
-    if (animating) return; // Prevent double send during animation
-    setAnimating(true);
-    setStatus(`Sending Frame ${frameNumber}`);
+  // Refs for SVG elements to manipulate transforms/opacities
+  const s1PacketRef = useRef(null);
+  const s1AckRef = useRef(null);
+  const s2PacketRef = useRef(null);
+  const s2AckRef = useRef(null);
+  const s2RetransRef = useRef(null);
+  const s3PacketRef = useRef(null);
+  const s3LostVisualRef = useRef(null);
+  const s3RetransRef = useRef(null);
 
-    // Start animation by setting class - handled by CSS animation
-    setTimeout(() => {
-      setStatus(`Frame ${frameNumber} received, sending ACK`);
-      setWaitingAck(true);
-      animateAckBack();
-    }, 2000); // Frame travel time simulated 2 seconds
+  // Refs for path elements
+  const pathS1ToR = useRef(null);
+  const pathS1ToS = useRef(null);
+  const pathS2ToR = useRef(null);
+  const pathS2AckBack = useRef(null);
+  const pathS3ToR = useRef(null);
+  const pathS3Retrans = useRef(null);
 
-    // Setup timeout for ACK wait (simulate delayed/lost ACK)
-    timeoutRef.current = setTimeout(() => {
-      if (waitingAck) {
-        setStatus(`Timeout! Retransmitting Frame ${frameNumber}`);
-        setWaitingAck(false);
-        setAnimating(false);
-        sendFrame(); // Retransmit frame
-      }
-    }, 6000); // Wait 6 seconds max for ACK
+  // Helper to set transform translate(x,y)
+  const setTranslate = (elem, x, y) => {
+    if (elem) {
+      elem.setAttribute("transform", `translate(${x},${y})`);
+    }
   };
 
-  const animateAckBack = () => {
-    // Simulate if ACK lost or not
-    const ackLost = Math.random() < ACK_LOSS_PROBABILITY;
+  // Move element along path based on normalized t [0..1]
+  const moveAlong = (pathElem, elem, t) => {
+    if (!pathElem || !elem) return;
+    const L = pathElem.getTotalLength();
+    t = Math.min(Math.max(t, 0), 1);
+    const pt = pathElem.getPointAtLength(L * t);
+    setTranslate(elem, pt.x, pt.y);
+  };
 
-    setTimeout(() => {
-      if (ackLost) {
-        setStatus("ACK lost! Waiting for timeout...");
-        // Don't clear waitingAck, timeout handler will retransmit
+  // Reset visuals to initial state
+  function resetAll() {
+    cancelAnimationFrame(rafId.current);
+    setRunning(false);
+    setCurrentScene(0);
+    sceneStart.current = null;
+    setSceneState(0);
+
+    // Initial positions
+    moveAlong(pathS1ToR.current, s1PacketRef.current, 0);
+    moveAlong(pathS1ToS.current, s1AckRef.current, 0);
+    setTranslate(s2PacketRef.current, 220, 310);
+    setTranslate(s2AckRef.current, 680, 340);
+    setTranslate(s2RetransRef.current, 220, 360);
+    setTranslate(s3PacketRef.current, 220, 480);
+    setTranslate(s3LostVisualRef.current, 450, 520);
+    setTranslate(s3RetransRef.current, 220, 560);
+
+    // Opacities initial
+    if (s1PacketRef.current) s1PacketRef.current.style.opacity = 1;
+    if (s1AckRef.current) s1AckRef.current.style.opacity = 0;
+    if (s2PacketRef.current) s2PacketRef.current.style.opacity = 1;
+    if (s2AckRef.current) s2AckRef.current.style.opacity = 0;
+    if (s2RetransRef.current) s2RetransRef.current.style.opacity = 0;
+    if (s3PacketRef.current) s3PacketRef.current.style.opacity = 1;
+    if (s3LostVisualRef.current) s3LostVisualRef.current.style.opacity = 0;
+    if (s3RetransRef.current) s3RetransRef.current.style.opacity = 0;
+
+    setExplainText(
+      `Press Step to walk one event at a time.\n\nVisual summary:\n1) Success: Sender sends packet → Receiver receives → sends ACK → Sender receives ACK → next packet.\n2) Timeout: ACK not received within timeout → Sender retransmits packet.\n3) Lost: Packet lost in transit → no ACK → timeout → retransmit.`
+    );
+  }
+
+  // Duration constants
+  const DURATION = 2400; // ms per travel/action block
+
+  // Animate a single scene given timestamp
+  // Returns true if scene ends
+  function animateScene(timestamp) {
+    if (!sceneStart.current) sceneStart.current = timestamp;
+    const elapsed = timestamp - sceneStart.current;
+
+    if (currentScene === 0) {
+      // Scenario 1: success
+      if (elapsed < DURATION) {
+        const t = elapsed / DURATION;
+        moveAlong(pathS1ToR.current, s1PacketRef.current, t);
+        if (s1PacketRef.current) s1PacketRef.current.style.opacity = 1;
+        if (s1AckRef.current) s1AckRef.current.style.opacity = 0;
+        setExplainText("Scenario 1: Sender sends DATA → Receiver will ACK.");
+      } else if (elapsed < 2 * DURATION) {
+        if (s1PacketRef.current) s1PacketRef.current.style.opacity = 0;
+        const t2 = (elapsed - DURATION) / DURATION;
+        moveAlong(pathS1ToS.current, s1AckRef.current, t2);
+        if (s1AckRef.current) s1AckRef.current.style.opacity = 1;
+        setExplainText("Scenario 1: Receiver sends ACK back to sender.");
       } else {
-        setStatus(`ACK received for Frame ${frameNumber}`);
-        setWaitingAck(false);
-        clearTimeout(timeoutRef.current);
-        setAnimating(false);
-        // Advance to next frame number (0 or 1)
-        setFrameNumber((prev) => (prev === 0 ? 1 : 0));
-        setTimeout(() => {
-          setStatus(`Ready to send Frame ${frameNumber === 0 ? 1 : 0}`);
-        }, 1000);
+        if (s1AckRef.current) s1AckRef.current.style.opacity = 0;
+        sceneStart.current = null;
+        setCurrentScene((prev) => prev + 1);
+        return true;
       }
-    }, 1500); // ACK travel time simulated 1.5 seconds
+    } else if (currentScene === 1) {
+      // Scenario 2: timeout & retransmit
+      if (elapsed < DURATION) {
+        const t = elapsed / DURATION;
+        moveAlong(pathS2ToR.current, s2PacketRef.current, t);
+        if (s2PacketRef.current) s2PacketRef.current.style.opacity = 1;
+        if (s2AckRef.current) s2AckRef.current.style.opacity = 0;
+        if (s2RetransRef.current) s2RetransRef.current.style.opacity = 0;
+        setExplainText("Scenario 2: Sender sends DATA; ACK is delayed.");
+      } else if (elapsed < 1.6 * DURATION) {
+        if (s2PacketRef.current) s2PacketRef.current.style.opacity = 0.4;
+        setExplainText("Scenario 2: Sender waited; timeout occurs (no ACK).");
+      } else if (elapsed < 2.6 * DURATION) {
+        const t2 = (elapsed - 1.6 * DURATION) / DURATION;
+        if (s2RetransRef.current) {
+          s2RetransRef.current.style.opacity = 1;
+          moveAlong(pathS2ToR.current, s2RetransRef.current, t2);
+        }
+        if (t2 > 0.85 && s2AckRef.current) {
+          s2AckRef.current.style.opacity = 1;
+          // Animate ack coming back a bit
+          moveAlong(
+            pathS2AckBack.current,
+            s2AckRef.current,
+            (t2 - 0.85) / 0.15
+          );
+        }
+        setExplainText(
+          "Scenario 2: Timeout → Sender retransmits DATA' → ACK returns."
+        );
+      } else {
+        if (s2AckRef.current) s2AckRef.current.style.opacity = 0;
+        if (s2RetransRef.current) s2RetransRef.current.style.opacity = 0;
+        sceneStart.current = null;
+        setCurrentScene((prev) => prev + 1);
+        return true;
+      }
+    } else if (currentScene === 2) {
+      // Scenario 3: lost packet
+      if (elapsed < 0.6 * DURATION) {
+        const t = elapsed / (0.6 * DURATION);
+        moveAlong(pathS3ToR.current, s3PacketRef.current, t);
+        if (s3PacketRef.current) s3PacketRef.current.style.opacity = 1;
+        if (s3LostVisualRef.current) s3LostVisualRef.current.style.opacity = 0;
+        setExplainText(
+          "Scenario 3: Sender sends DATA (gets lost mid-way)."
+        );
+      } else if (elapsed < 1.4 * DURATION) {
+        if (s3PacketRef.current)
+          s3PacketRef.current.style.opacity = Math.max(
+            0,
+            1 - (elapsed - 0.6 * DURATION) / (0.3 * DURATION)
+          );
+        if (s3LostVisualRef.current)
+          s3LostVisualRef.current.style.opacity = Math.min(
+            1,
+            (elapsed - 0.6 * DURATION) / (0.2 * DURATION)
+          );
+        setExplainText(
+          "Scenario 3: Packet lost in transit → no ACK arrives."
+        );
+      } else if (elapsed < 2.6 * DURATION) {
+        const t2 = (elapsed - 1.4 * DURATION) / DURATION;
+        if (s3RetransRef.current) {
+          s3RetransRef.current.style.opacity = 1;
+          moveAlong(pathS3Retrans.current, s3RetransRef.current, t2);
+        }
+        setExplainText(
+          "Scenario 3: Timeout → retransmit of DATA' → receiver receives."
+        );
+      } else {
+        if (s3RetransRef.current) s3RetransRef.current.style.opacity = 0;
+        if (s3LostVisualRef.current) s3LostVisualRef.current.style.opacity = 0;
+        sceneStart.current = null;
+        setCurrentScene((prev) => prev + 1);
+        return true;
+      }
+    } else {
+      // All scenes done
+      setRunning(false);
+      setExplainText(
+        "Done: All scenarios completed. Press Reset to run again."
+      );
+      return true;
+    }
+    return false;
+  }
+
+  // Animation loop with requestAnimationFrame
+  const loop = (timestamp) => {
+    if (!running) return;
+    const finished = animateScene(timestamp);
+    if (finished && running) {
+      sceneStart.current = null;
+    }
+    rafId.current = requestAnimationFrame(loop);
   };
 
-  return (
-    <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: "#111", color: "#eee", minHeight: "600px" }}>
-      <h2>Stop-and-Wait ARQ Protocol Simulation</h2>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-around", marginTop: 20 }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{
-            width: 80, height: 80, backgroundColor: "#2e7d32",
-            borderRadius: "50%", lineHeight: "80px", fontWeight: "bold"
-          }}>Sender</div>
-        </div>
+  // Step one scene to completion
+  const handleStep = () => {
+    if (currentScene > 2) {
+      setExplainText("All scenes already shown. Press Reset to run again.");
+      return;
+    }
+    setRunning(true);
+    sceneStart.current = null;
+    const stepLoop = (timestamp) => {
+      const finished = animateScene(timestamp);
+      if (!finished) {
+        rafId.current = requestAnimationFrame(stepLoop);
+      } else {
+        setRunning(false);
+        cancelAnimationFrame(rafId.current);
+      }
+    };
+    rafId.current = requestAnimationFrame(stepLoop);
+  };
 
-        <div style={{ position: "relative", width: "60%" }}>
-          {/* Frame indicator */}
-          <div
-            className={`frame ${animating ? "animate-frame" : ""}`}
+  // Reset all to initial state
+  const handleReset = () => {
+    resetAll();
+  };
+
+  // On mount, reset all to init state
+  useEffect(() => {
+    resetAll();
+    // Cleanup on unmount
+    return () => cancelAnimationFrame(rafId.current);
+  }, []);
+
+  // JSX for SVG with ref bindings to elements and paths
+  return (
+    <div
+      className="wrap"
+      style={{
+        maxWidth: 920,
+        margin: "24px auto",
+        padding: 18,
+        borderRadius: 10,
+        background: "var(--bg, #052626)",
+        color: "var(--muted, #cfece6)",
+        fontFamily: "'Segoe UI', Roboto, Arial, sans-serif",
+      }}
+    >
+      <h1
+        style={{
+          fontSize: 32,
+          margin: "4px 0 12px",
+          textAlign: "center",
+          color: "#ffd54a",
+          letterSpacing: 1,
+        }}
+      >
+        STOP-AND-WAIT PROTOCOL — Vertical visualization
+      </h1>
+
+      <div
+        className="toolbar"
+        style={{
+          display: "flex",
+          gap: 8,
+          justifyContent: "center",
+          marginBottom: 10,
+        }}
+      >
+        <div className="controls" style={{ textAlign: "center" }}>
+          <button
+            onClick={handleStep}
             style={{
-              position: "absolute",
-              top: 30,
-              left: 0,
-              width: 40,
-              height: 40,
+              background: "#0b3a3a",
+              border: "1px solid rgba(255,255,255,0.04)",
+              color: "var(--muted, #cfece6)",
+              padding: "8px 12px",
               borderRadius: 6,
-              backgroundColor: "#2196f3",
-              color: "#fff",
-              textAlign: "center",
-              lineHeight: "40px",
-              fontWeight: "bold",
-              transition: "left 2s linear",
-              left: animating ? "calc(100% - 40px)" : 0
+              cursor: "pointer",
+              fontWeight: 600,
+              marginRight: 8,
             }}
           >
-            {frameNumber}
+            Step ▶
+          </button>
+          <button
+            onClick={handleReset}
+            style={{
+              background: "#0b3a3a",
+              border: "1px solid rgba(255,255,255,0.04)",
+              color: "var(--muted, #cfece6)",
+              padding: "8px 12px",
+              borderRadius: 6,
+              cursor: "pointer",
+              fontWeight: 600,
+            }}
+          >
+            Reset
+          </button>
+          <div
+            className="controls small"
+            style={{ fontSize: 11, color: "#99d9d0", marginTop: 6 }}
+          >
+            Use Step to walk through events
           </div>
-
-          {/* ACK indicator */}
-          {waitingAck && (
-            <div
-              className="ack animate-ack"
-              style={{
-                position: "absolute",
-                top: 80,
-                left: "calc(100% - 40px)",
-                width: 24,
-                height: 24,
-                borderRadius: "50%",
-                backgroundColor: "#fbc02d",
-                color: "#000",
-                textAlign: "center",
-                lineHeight: "24px",
-                fontWeight: "bold",
-                animation: "ackBack 1.5s linear forwards"
-              }}
-            >
-              ✓
-            </div>
-          )}
-        </div>
-
-        <div style={{ textAlign: "center" }}>
-          <div style={{
-            width: 80, height: 80, backgroundColor: "#c62828",
-            borderRadius: "50%", lineHeight: "80px", fontWeight: "bold"
-          }}>Receiver</div>
         </div>
       </div>
 
-      <div style={{
-        marginTop: 40,
-        backgroundColor: "#222",
-        padding: 16,
-        borderRadius: 6,
-        minHeight: 60,
-        fontSize: 16,
-      }}>{status}</div>
-
-      <button
-        onClick={sendFrame}
-        disabled={animating || waitingAck}
+      <div
+        className="canvas"
+        role="img"
+        aria-label="Stop and wait protocol vertical interaction"
         style={{
-          marginTop: 30,
-          padding: "10px 20px",
-          fontSize: 16,
-          cursor: animating || waitingAck ? "not-allowed" : "pointer",
-          backgroundColor: animating || waitingAck ? "#555" : "#1976d2",
-          color: "#fff",
-          border: "none",
-          borderRadius: 4
+          background:
+            "linear-gradient(180deg, rgba(0,0,0,0.06), transparent)",
+          borderRadius: 10,
+          padding: 14,
+          boxShadow: "0 6px 18px rgba(0,0,0,0.5)",
         }}
       >
-        Send Frame
-      </button>
+        <svg
+          viewBox="0 0 900 700"
+          preserveAspectRatio="xMidYMid meet"
+          style={{ width: "100%", height: 640, display: "block", overflow: "visible" }}
+        >
+          <text
+            x="450"
+            y="36"
+            fontSize="18"
+            fill="#ffd54a"
+            textAnchor="middle"
+            fontWeight="700"
+          >
+            Stop-and-Wait — vertical timeline
+          </text>
 
-      <pre
+          {/* Sender and Receiver vertical lanes */}
+          <line
+            x1="220"
+            y1="80"
+            x2="220"
+            y2="620"
+            strokeWidth="6"
+            strokeLinecap="round"
+            stroke="#ff9f1c"
+          />
+          <line
+            x1="680"
+            y1="80"
+            x2="680"
+            y2="620"
+            strokeWidth="6"
+            strokeLinecap="round"
+            stroke="#2ecc71"
+          />
+          <text
+            x="220"
+            y="60"
+            fontSize="20"
+            fill="var(--muted, #cfece6)"
+            fontWeight="700"
+            textAnchor="middle"
+          >
+            Sender
+          </text>
+          <text
+            x="680"
+            y="60"
+            fontSize="20"
+            fill="var(--muted, #cfece6)"
+            fontWeight="700"
+            textAnchor="middle"
+          >
+            Receiver
+          </text>
+
+          {/* Scenario labels */}
+          <text
+            x="450"
+            y="120"
+            fontSize="16"
+            fill="#bff6ff"
+            textAnchor="middle"
+          >
+            1) Successful send
+          </text>
+          <text
+            x="450"
+            y="290"
+            fontSize="16"
+            fill="#bff6ff"
+            textAnchor="middle"
+          >
+            2) Timeout & Retransmit
+          </text>
+          <text
+            x="450"
+            y="460"
+            fontSize="16"
+            fill="#bff6ff"
+            textAnchor="middle"
+          >
+            3) Packet Lost (timeout → retransmit)
+          </text>
+
+          {/* Scenario 1 group */}
+          <g id="s1">
+            <g id="s1Packet" ref={s1PacketRef} transform="translate(220,140)">
+              <rect
+                x="-12"
+                y="-10"
+                width="48"
+                height="22"
+                rx="4"
+                fill="#66d1ff"
+                stroke="rgba(0,0,0,0.12)"
+                strokeWidth="1"
+                filter="drop-shadow(0 2px 4px rgba(0,0,0,0.4))"
+              />
+              <text
+                x="12"
+                y="6"
+                fontSize="11"
+                textAnchor="middle"
+                fill="#032326"
+                fontWeight="700"
+              >
+                DATA
+              </text>
+            </g>
+            <g id="s1Ack" ref={s1AckRef} transform="translate(680,190)" opacity={0}>
+              <rect
+                x="-12"
+                y="-10"
+                width="40"
+                height="20"
+                rx="4"
+                fill="#a7ffe1"
+                stroke="rgba(0,0,0,0.12)"
+                strokeWidth="1"
+              />
+              <text
+                x="8"
+                y="5"
+                fontSize="11"
+                fill="#03332b"
+                fontWeight="700"
+              >
+                ACK
+              </text>
+            </g>
+            <text
+              x="450"
+              y="160"
+              fontSize="14"
+              fill="#bff6ff"
+              textAnchor="middle"
+            >
+              Data packet →
+            </text>
+            <text
+              x="450"
+              y="200"
+              fontSize="14"
+              fill="#bff6ff"
+              textAnchor="middle"
+            >
+              ← Acknowledgement
+            </text>
+          </g>
+
+          {/* Scenario 2 group */}
+          <g id="s2">
+            <g id="s2Packet" ref={s2PacketRef} transform="translate(220,310)">
+              <rect
+                x="-12"
+                y="-10"
+                width="48"
+                height="22"
+                rx="4"
+                fill="#66d1ff"
+                stroke="rgba(0,0,0,0.12)"
+                strokeWidth="1"
+              />
+              <text
+                x="12"
+                y="6"
+                fontSize="11"
+                textAnchor="middle"
+                fill="#032326"
+                fontWeight="700"
+              >
+                DATA
+              </text>
+            </g>
+            <g id="s2Ack" ref={s2AckRef} transform="translate(680,340)" style={{ opacity: 0 }}>
+              <rect
+                x="-12"
+                y="-10"
+                width="40"
+                height="20"
+                rx="4"
+                fill="#a7ffe1"
+                stroke="rgba(0,0,0,0.12)"
+                strokeWidth="1"
+              />
+              <text
+                x="8"
+                y="5"
+                fontSize="11"
+                fill="#03332b"
+                fontWeight="700"
+              >
+                ACK
+              </text>
+            </g>
+            <g id="s2Retrans" ref={s2RetransRef} transform="translate(220,360)" style={{ opacity: 0 }}>
+              <rect
+                x="-12"
+                y="-10"
+                width="48"
+                height="22"
+                rx="4"
+                fill="#66d1ff"
+                stroke="rgba(0,0,0,0.12)"
+                strokeWidth="1"
+              />
+              <text
+                x="12"
+                y="6"
+                fontSize="11"
+                textAnchor="middle"
+                fill="#032326"
+                fontWeight="700"
+              >
+                DATA'
+              </text>
+            </g>
+            <text
+              x="450"
+              y="330"
+              fontSize="14"
+              fill="#bff6ff"
+              textAnchor="middle"
+            >
+              Sender times out → retransmits
+            </text>
+          </g>
+
+          {/* Scenario 3 group */}
+          <g id="s3">
+            <g id="s3Packet" ref={s3PacketRef} transform="translate(220,480)">
+              <rect
+                x="-12"
+                y="-10"
+                width="48"
+                height="22"
+                rx="4"
+                fill="#66d1ff"
+                stroke="rgba(0,0,0,0.12)"
+                strokeWidth="1"
+              />
+              <text
+                x="12"
+                y="6"
+                fontSize="11"
+                textAnchor="middle"
+                fill="#032326"
+                fontWeight="700"
+              >
+                DATA
+              </text>
+            </g>
+            <g id="s3LostVisual" ref={s3LostVisualRef} transform="translate(450,520)" opacity={0}>
+              <text
+                x="0"
+                y="0"
+                fontSize="13"
+                fill="#ff6b6b"
+                textAnchor="middle"
+                fontWeight="700"
+              >
+                LOST
+              </text>
+            </g>
+            <g id="s3Retrans" ref={s3RetransRef} transform="translate(220,560)" opacity={0}>
+              <rect
+                x="-12"
+                y="-10"
+                width="48"
+                height="22"
+                rx="4"
+                fill="#66d1ff"
+                stroke="rgba(0,0,0,0.12)"
+                strokeWidth="1"
+              />
+              <text
+                x="12"
+                y="6"
+                fontSize="11"
+                textAnchor="middle"
+                fill="#032326"
+                fontWeight="700"
+              >
+                DATA'
+              </text>
+            </g>
+            <text
+              x="450"
+              y="495"
+              fontSize="14"
+              fill="#bff6ff"
+              textAnchor="middle"
+            >
+              Packet lost in transit → sender times out → retransmit
+            </text>
+          </g>
+
+          {/* Arrow markers */}
+          <defs>
+            <marker
+              id="arrow"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="8"
+              markerHeight="8"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#66d1ff" />
+            </marker>
+            <marker
+              id="arrowAck"
+              viewBox="0 0 10 10"
+              refX="1"
+              refY="5"
+              markerWidth="7"
+              markerHeight="7"
+              orient="auto"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a7ffe1" />
+            </marker>
+          </defs>
+
+          {/* Invisible paths for animation (refs used for position calculation) */}
+          <path
+            id="pathS1ToR"
+            ref={pathS1ToR}
+            d="M220 140 C 360 155, 540 165, 680 190"
+            fill="none"
+            stroke="transparent"
+          />
+          <path
+            id="pathS1ToS"
+            ref={pathS1ToS}
+            d="M680 190 C 540 200, 360 210, 220 220"
+            fill="none"
+            stroke="transparent"
+          />
+          <path
+            id="pathS2ToR"
+            ref={pathS2ToR}
+            d="M220 310 C 360 325, 540 335, 680 340"
+            fill="none"
+            stroke="transparent"
+          />
+          <path
+            id="pathS2AckBack"
+            ref={pathS2AckBack}
+            d="M680 340 C 540 350, 360 360, 220 360"
+            fill="none"
+            stroke="transparent"
+          />
+          <path
+            id="pathS3ToR"
+            ref={pathS3ToR}
+            d="M220 480 C 360 500, 540 510, 680 520"
+            fill="none"
+            stroke="transparent"
+          />
+          <path
+            id="pathS3Retrans"
+            ref={pathS3Retrans}
+            d="M220 560 C 360 570, 540 580, 680 590"
+            fill="none"
+            stroke="transparent"
+          />
+
+          {/* Legend bubble */}
+          <rect
+            x="20"
+            y="20"
+            width="160"
+            height="70"
+            rx="10"
+            fill="rgba(255,255,255,0.03)"
+            stroke="rgba(255,255,255,0.03)"
+          />
+          <text
+            x="100"
+            y="40"
+            fontSize="13"
+            fill="var(--muted, #cfece6)"
+            textAnchor="middle"
+            fontWeight="700"
+          >
+            Legend
+          </text>
+          <text
+            x="100"
+            y="58"
+            fontSize="13"
+            fill="var(--muted, #cfece6)"
+            textAnchor="middle"
+          >
+            Blue=DATA, Mint=ACK
+          </text>
+        </svg>
+      </div>
+
+      <div
+        className="step-card"
         style={{
-          marginTop: 40,
-          background: "#222",
-          color: "#eee",
-          padding: 16,
+          background: "rgba(255,255,255,0.03)",
+          padding: 8,
           borderRadius: 8,
-          whiteSpace: "pre-wrap",
-          fontFamily: "monospace",
-          lineHeight: 1.5
+          marginTop: 12,
+          color: "var(--muted, #cfece6)",
+          fontSize: 15,
+          lineHeight: 1.4,
+          minHeight: 80,
+          whiteSpace: "pre-line",
+          fontFamily: "'Segoe UI', Roboto, Arial, sans-serif",
         }}
-      >{`Experiment Explanation - Stop-and-Wait ARQ Protocol
-
-Stop-and-Wait ARQ (Automatic Repeat reQuest) is a simple yet fundamental error control method used in data communication.
-
-How it works:
-
-- The sender transmits one frame at a time and waits for an acknowledgment (ACK) from the receiver before sending the next frame.
-- The receiver sends an ACK back to the sender when it correctly receives a frame.
-- If the sender does not receive an ACK within a certain timeout period, it retransmits the frame.
-- This method ensures reliable delivery of frames over an unreliable or noisy communication channel.
-
-Key Features:
-
-- Sequence numbers (usually 0 and 1) are alternated for each new frame to differentiate retransmissions from new frames.
-- Only one frame is outstanding at any point, so sender and receiver are synchronized in send-receive steps.
-- Timeout mechanism triggers retransmission when ACK is lost or delayed.
-
-Advantages:
-
-- Simple to implement.
-- Guarantees reliable and ordered delivery of data frames.
-
-Limitations:
-
-- Inefficient for long-distance or high-delay networks since the sender is idle while waiting for ACK.
-- Throughput decreases significantly with higher delays or loss rates.
-
-This experiment visually simulates the core concepts by animating frames moving from sender to receiver, ACKs moving back, and retransmissions upon timeout, helping you understand the timing and flow control in Stop-and-Wait ARQ.`}</pre>
-
-      <style>{`
-        @keyframes ackBack {
-          0% { left: calc(100% - 40px); }
-          100% { left: 0; }
-        }
-      `}</style>
+      >
+        {explainText}
+      </div>
     </div>
   );
 }
 
-function DijkstraVisualization() {
-  const containerRef = useRef(null);
-  const [steps, setSteps] = useState([]);
-  const [currentStep, setCurrentStep] = useState(0);
-  const [isRunning, setIsRunning] = useState(false);
-  const [graphData, setGraphData] = useState(null); // store nodes/edges
+function DijkstraVisualization({ isActive = true }) {
+  const [nodes] = useState([
+    { id: "A", x: 100, y: 150 },
+    { id: "B", x: 250, y: 80 },
+    { id: "C", x: 400, y: 150 },
+    { id: "D", x: 250, y: 250 },
+    { id: "E", x: 550, y: 150 },
+    { id: "F", x: 700, y: 250 },
+  ]);
+  const [edges] = useState([
+    { from: "A", to: "B", weight: 4 },
+    { from: "A", to: "D", weight: 2 },
+    { from: "B", to: "C", weight: 3 },
+    { from: "B", to: "D", weight: 1 },
+    { from: "C", to: "E", weight: 2 },
+    { from: "D", to: "C", weight: 5 },
+    { from: "D", to: "E", weight: 3 },
+    { from: "E", to: "F", weight: 4 },
+    { from: "C", to: "F", weight: 6 },
+  ]);
 
-  // Define initial graph structure
-  const nodes = [
-    { id: 0, label: "A", position: [0, 0, 0] },
-    { id: 1, label: "B", position: [4, 0, 0] },
-    { id: 2, label: "C", position: [2, 3, 0] },
-    { id: 3, label: "D", position: [6, 3, 0] },
-    { id: 4, label: "E", position: [8, 0, 0] }
-  ];
+  const [routingTable, setRoutingTable] = useState([]);
+  const [stepIndex, setStepIndex] = useState(0);
+  const [shortestPath, setShortestPath] = useState([]);
+  const [finalDistance, setFinalDistance] = useState(0);
+  const [tableFilled, setTableFilled] = useState(false);
+  const [log, setLog] = useState([]);
+  const [paused, setPaused] = useState(true);
+  const intervalRef = useRef(null);
 
-  const edges = [
-    { from: 0, to: 1, weight: 4 },
-    { from: 0, to: 2, weight: 2 },
-    { from: 1, to: 2, weight: 1 },
-    { from: 1, to: 3, weight: 5 },
-    { from: 2, to: 3, weight: 8 },
-    { from: 2, to: 4, weight: 10 },
-    { from: 3, to: 4, weight: 2 }
-  ];
-
-  // Generate the steps of Dijkstra's Algorithm
-  const runDijkstra = () => {
-    const distances = Array(nodes.length).fill(Infinity);
-    const visited = Array(nodes.length).fill(false);
-    const prev = Array(nodes.length).fill(null);
-    const stepsLog = [];
-
-    distances[0] = 0; // start at node 0 (A)
-
-    for (let i = 0; i < nodes.length; i++) {
-      // Find unvisited node with smallest distance
-      let minDist = Infinity;
-      let u = -1;
-      for (let v = 0; v < nodes.length; v++) {
-        if (!visited[v] && distances[v] < minDist) {
-          minDist = distances[v];
-          u = v;
-        }
-      }
-      if (u === -1) break; // All visited or unreachable
-
-      visited[u] = true;
-      stepsLog.push(`Visit node ${nodes[u].label} (${u}) with current shortest distance ${distances[u]}`);
-
-      // Update neighboring nodes
-      for (const edge of edges) {
-        let v = -1;
-        if (edge.from === u) v = edge.to;
-        else if (edge.to === u) v = edge.from;
-        else continue;
-
-        if (!visited[v]) {
-          const newDist = distances[u] + edge.weight;
-          if (newDist < distances[v]) {
-            distances[v] = newDist;
-            prev[v] = u;
-            stepsLog.push(`Update distance of node ${nodes[v].label} (${v}) to ${newDist}`);
+  useEffect(() => {
+    if (!isActive) return;
+    const distances = { A: 0 };
+    const previous = {};
+    const unvisited = new Set(nodes.map(n => n.id));
+    nodes.forEach(n => {
+      if (n.id !== "A") distances[n.id] = Infinity;
+    });
+    const steps = [];
+    while (unvisited.size > 0) {
+      const current = Array.from(unvisited).reduce(
+        (min, node) => (distances[node] < distances[min] ? node : min)
+      );
+      unvisited.delete(current);
+      edges.forEach(edge => {
+        if (edge.from === current && unvisited.has(edge.to)) {
+          const nd = distances[current] + edge.weight;
+          if (nd < distances[edge.to]) {
+            distances[edge.to] = nd;
+            previous[edge.to] = current;
           }
         }
-      }
+        if (edge.to === current && unvisited.has(edge.from)) {
+          const nd = distances[current] + edge.weight;
+          if (nd < distances[edge.from]) {
+            distances[edge.from] = nd;
+            previous[edge.from] = current;
+          }
+        }
+      });
+      steps.push({
+        currentNode: current,
+        distances: { ...distances },
+        previous: { ...previous },
+      });
     }
-
-    // Create a step-wise path update report
-    const pathSteps = nodes.map((node, index) => ({
-      node: node.label,
-      distance: distances[index],
-      path: reconstructPath(prev, index, nodes)
-    }));
-
-    setSteps(stepsLog);
-  };
-
-  const reconstructPath = (prev, target, nodes) => {
-    const path = [];
-    for (let u = target; u !== null; u = prev[u]) {
-      path.unshift(nodes[u].label);
+    const path = ["F"];
+    let c = "F";
+    while (previous[c]) {
+      c = previous[c];
+      path.unshift(c);
     }
-    return path.join(" -> ");
-  };
+    setRoutingTable(steps);
+    setShortestPath(path);
+    setFinalDistance(distances["F"]);
+    setStepIndex(0);
+    setTableFilled(false);
+    setLog([`Ready. Press Play to start the simulation.`]);
+    setPaused(true);
+    clearInterval(intervalRef.current);
+  }, [isActive]);
 
-  // Initialize graph data for rendering
   useEffect(() => {
-    setGraphData({ nodes, edges });
-  }, []);
-
-  // Handle animation step-by-step
-  const handleNext = () => {
-    if (currentStep + 1 < steps.length) {
-      setCurrentStep(currentStep + 1);
+    if (!routingTable.length) return;
+    clearInterval(intervalRef.current);
+    if (!paused && stepIndex < routingTable.length) {
+      intervalRef.current = setInterval(() => {
+        setStepIndex(prev => {
+          if (prev < routingTable.length - 1) {
+            const next = prev + 1;
+            const step = routingTable[next];
+            setLog(logs => [
+              ...logs,
+              `Step ${next + 1}: Visiting ${step.currentNode}. Distances: ${Object.entries(
+                step.distances
+              ).map(([k, v]) => `${k}:${v === Infinity ? "∞" : v}`).join(', ')}. Previous: ${Object.entries(
+                step.previous
+              ).map(([k, v]) => `${k}←${v}`).join(', ')}`
+            ]);
+            return next;
+          } else {
+            setTableFilled(true);
+            clearInterval(intervalRef.current);
+            setLog(logs => [
+              ...logs,
+              `Simulation complete. Final path: ${shortestPath.join(
+                " → "
+              )}, Total Distance: ${finalDistance}`,
+            ]);
+            return prev;
+          }
+        });
+      }, 1200);
     }
-  };
+    return () => clearInterval(intervalRef.current);
+  }, [routingTable, paused, stepIndex, shortestPath, finalDistance]);
 
-  const handleStart = () => {
-    if (!isRunning) {
-      runDijkstra();
-      setCurrentStep(0);
-      setIsRunning(true);
-    }
-  };
-
+  const handlePauseResume = () => setPaused((v) => !v);
   const handleReset = () => {
-    setCurrentStep(0);
-    setIsRunning(false);
-    setSteps([]);
+    clearInterval(intervalRef.current);
+    setStepIndex(0);
+    setTableFilled(false);
+    setPaused(true);
+    setLog([`Ready. Press Play to start the simulation.`]);
   };
 
-  // Rendering the 3D scene with Three.js (simplified mock-up)
-  // For a real scene, you'd replace this with actual Three.js WebGL rendering
+  const currentStep = routingTable[stepIndex] || {};
+  const playLabel =
+    paused && stepIndex === 0
+      ? "Play Simulation"
+      : paused
+      ? "Resume Simulation"
+      : "Pause Simulation";
+  const showFinalPath = tableFilled;
+
   return (
-    <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: "#111", color: "#eee" }}>
-      <h2>Dijkstra's Algorithm Visualization</h2>
-
-      {/* Graph visualization Placeholder */}
-      <div style={{ display: "flex", justifyContent: "center", margin: "20px 0", height: 300, border: "1px solid #444", position: "relative" }}>
-        {graphData && graphData.nodes.map(node => (
-          <div key={node.id} style={{
-            position: "absolute",
-            top: node.position[1] + 150,
-            left: node.position[0] + 150,
-            width: 30,
-            height: 30,
-            backgroundColor: "skyblue",
-            borderRadius: "50%",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 14,
-            fontWeight: "bold"
-          }}>
-            {node.label}
-          </div>
-        ))}
-        {/* Edges as lines */}
-        {graphData && graphData.edges.map((edge, index) => {
-          const fromNode = graphData.nodes[edge.from];
-          const toNode = graphData.nodes[edge.to];
-          return (
-            <line
-              key={index}
-              x1={fromNode.position[0] + 150}
-              y1={fromNode.position[1] + 150}
-              x2={toNode.position[0] + 150}
-              y2={toNode.position[1] + 150}
-              stroke="#999"
-              strokeWidth={2}
-            />
-          );
-        })}
+    <div
+      style={{
+        background: "linear-gradient(135deg, #22253b, #232a32 84%)",
+        borderRadius: 20,
+        minHeight: "100vh",
+        padding: 30,
+        fontFamily: "Segoe UI, Arial, sans-serif",
+      }}
+    >
+      <div style={{ marginBottom: 30, display: "flex", gap: 18 }}>
+        <button
+          onClick={handlePauseResume}
+          style={{
+            background: paused ? "#ff83a3" : "#fc7ea6",
+            color: "#fff",
+            fontWeight: 600,
+            border: "none",
+            borderRadius: 8,
+            fontSize: 17,
+            padding: "12px 38px",
+            boxShadow: "0 2px 8px #0007",
+            cursor: "pointer",
+          }}
+        >
+          {playLabel}
+        </button>
+        <button
+          onClick={handleReset}
+          style={{
+            background: "#333",
+            color: "#ddd",
+            border: "none",
+            borderRadius: 8,
+            fontSize: 17,
+            padding: "12px 38px",
+            cursor: "pointer",
+          }}
+        >
+          Reset
+        </button>
       </div>
 
-      {/* Controls */}
-      <div style={{ marginBottom: 20 }}>
-        <button onClick={handleStart} disabled={isRunning} style={{ marginRight: 10, padding: "8px 12px" }}>Start</button>
-        <button onClick={handleNext} disabled={!isRunning || currentStep >= steps.length - 1} style={{ marginRight: 10, padding: "8px 12px" }}>Next Step</button>
-        <button onClick={handleReset} style={{ padding: "8px 12px" }}>Reset</button>
-      </div>
-
-      {/* Step log */}
-      <div style={{ background: "#222", padding: 10, borderRadius: 4, minHeight: 150, overflowY: "auto" }}>
-        <h3>Step Log:</h3>
-        {steps.slice(0, currentStep + 1).map((log, index) => (
-          <div key={index}>{log}</div>
-        ))}
-      </div>
-
-      {/* Theory Section */}
-      <pre
+      <div
         style={{
-          marginTop: 30,
+          display: "flex",
+          gap: 32,
+          maxWidth: 1080,
+          margin: "0 auto",
+          justifyContent: "center",
+        }}
+      >
+        <div
+          style={{
+            background: "rgba(30,30,30,0.8)",
+            borderRadius: 16,
+            padding: "24px 10px 10px 10px",
+            minWidth: 680,
+          }}
+        >
+          <h2
+            style={{
+              color: "#fff",
+              textAlign: "center",
+              marginBottom: 15,
+              fontWeight: 700,
+              fontSize: 22,
+            }}
+          >
+            Dijkstra's Algorithm Visualization
+          </h2>
+          <div
+            style={{
+              background: "#222",
+              borderRadius: 16,
+              width: 680,
+              height: 340,
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+            }}
+          >
+            <svg width="100%" height="100%" viewBox="0 0 800 340">
+              {/* Edges */}
+              {edges.map((edge, i) => {
+                const fromNode = nodes.find((n) => n.id === edge.from);
+                const toNode = nodes.find((n) => n.id === edge.to);
+                let isFinalEdge = false;
+                if (showFinalPath) {
+                  const fp = shortestPath;
+                  for (let k = 1; k < fp.length; k++) {
+                    if (
+                      (fp[k - 1] === edge.from && fp[k] === edge.to) ||
+                      (fp[k] === edge.from && fp[k - 1] === edge.to)
+                    ) {
+                      isFinalEdge = true;
+                      break;
+                    }
+                  }
+                }
+                return (
+                  <g key={i}>
+                    <line
+                      x1={fromNode.x}
+                      y1={fromNode.y}
+                      x2={toNode.x}
+                      y2={toNode.y}
+                      stroke={isFinalEdge ? "#19fc98" : "#bbb"}
+                      strokeWidth={isFinalEdge ? "4" : "2"}
+                      opacity={isFinalEdge ? 1 : 0.55}
+                    />
+                    <text
+                      x={(fromNode.x + toNode.x) / 2}
+                      y={(fromNode.y + toNode.y) / 2 - 8}
+                      textAnchor="middle"
+                      fill="#fff"
+                      fontSize="16"
+                      fontWeight={700}
+                    >
+                      {edge.weight}
+                    </text>
+                  </g>
+                );
+              })}
+              {/* Nodes */}
+              {nodes.map((node) => {
+                let isOnFinalPath = false;
+                if (showFinalPath && shortestPath.includes(node.id)) {
+                  isOnFinalPath = true;
+                }
+                const isCurrent = node.id === currentStep.currentNode;
+                const fill = isOnFinalPath
+                  ? "#19fc98"
+                  : isCurrent
+                  ? "#ffd54a"
+                  : "#42e2c4";
+                return (
+                  <g key={node.id}>
+                    <circle
+                      cx={node.x}
+                      cy={node.y}
+                      r="28"
+                      fill={fill}
+                      stroke="#fff"
+                      strokeWidth="3"
+                      style={{
+                        filter: isCurrent
+                          ? "drop-shadow(0 0 10px #ffd54a55)"
+                          : "",
+                      }}
+                    />
+                    <text
+                      x={node.x}
+                      y={node.y + 8}
+                      textAnchor="middle"
+                      fill="#fff"
+                      fontSize="21"
+                      fontWeight="bold"
+                    >
+                      {node.id}
+                    </text>
+                  </g>
+                );
+              })}
+            </svg>
+          </div>
+
+          <div
+            style={{
+              color: "#fff",
+              textAlign: "center",
+              marginTop: 18,
+              fontSize: "19px",
+              fontWeight: 500,
+            }}
+          >
+            Step: <span style={{ fontWeight: 700 }}>{stepIndex + 1}</span>/
+            {routingTable.length}
+          </div>
+
+          {tableFilled && (
+            <div
+              style={{
+                margin: "16px 0 0 0",
+                color: "#19fc98",
+                textAlign: "center",
+                fontWeight: 600,
+                fontSize: 18,
+              }}
+            >
+              Final Shortest Path Result <br />
+              <span style={{ fontWeight: 700 }}>
+                Shortest Path from A to F: {shortestPath.join(" → ")}
+              </span>
+              <br />
+              <span style={{ fontWeight: 700 }}>
+                Total Distance: {finalDistance}
+              </span>
+            </div>
+          )}
+
+          <div
+            style={{
+              background: "#192026",
+              borderRadius: 7,
+              padding: "14px 24px",
+              marginTop: 22,
+              minHeight: 70,
+              color: "#aad6ff",
+              fontSize: 16,
+              fontFamily: "monospace",
+              maxHeight: 160,
+              overflowY: "auto",
+            }}
+          >
+            {log.slice(Math.max(0, log.length - 7)).map((l, idx) => (
+              <div key={idx}>• {l}</div>
+            ))}
+          </div>
+        </div>
+
+        {/* Routing Table (show only rows up to and including stepIndex) */}
+        <div
+          style={{
+            background: "rgba(20,20,20,0.8)",
+            borderRadius: 16,
+            padding: "14px 8px",
+            minWidth: 340,
+            maxHeight: 500,
+            overflowY: "auto",
+          }}
+        >
+          <h3
+            style={{
+              color: "#fff",
+              fontSize: 17,
+              fontWeight: 700,
+              marginBottom: 10,
+              marginTop: 8,
+              textAlign: "center",
+            }}
+          >
+            Routing Table (Step-by-Step)
+          </h3>
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              fontSize: 15,
+              color: "#f3f8fc",
+            }}
+          >
+            <thead>
+              <tr style={{ background: "#222", fontWeight: 700 }}>
+                <th style={{ padding: 7, border: "1px solid #333" }}>
+                  Current Node
+                </th>
+                <th style={{ padding: 7, border: "1px solid #333" }}>
+                  Distances
+                </th>
+                <th style={{ padding: 7, border: "1px solid #333" }}>
+                  Previous
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {routingTable
+                .slice(0, stepIndex + 1)
+                .map((step, idx) => (
+                  <tr
+                    key={idx}
+                    style={{
+                      background:
+                        idx === stepIndex ? "#27284a" : "transparent",
+                    }}
+                  >
+                    <td
+                      style={{
+                        padding: 7,
+                        border: "1px solid #333",
+                        fontWeight: 600,
+                      }}
+                    >
+                      {step.currentNode}
+                    </td>
+                    <td style={{ padding: 7, border: "1px solid #333" }}>
+                      {Object.entries(step.distances)
+                        .map(
+                          ([node, dist]) =>
+                            `${node}:${dist === Infinity ? "∞" : dist}`
+                        )
+                        .join(", ")}
+                    </td>
+                    <td style={{ padding: 7, border: "1px solid #333" }}>
+                      {Object.entries(step.previous)
+                        .map(([node, prev]) => `${node}←${prev}`)
+                        .join(", ")}
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Theory */}
+      <div
+        style={{
+          marginTop: 35,
           background: "#222",
           color: "#eee",
           padding: 20,
-          borderRadius: 8,
+          borderRadius: 10,
+          maxWidth: 900,
           fontFamily: "monospace",
-          maxWidth: 800,
-          lineHeight: 1.5
+          fontSize: 15,
+          marginLeft: "auto",
+          marginRight: "auto",
+          whiteSpace: "pre-wrap",
+          boxShadow: "0 1px 8px #0003",
         }}
       >
-{`Theory of Dijkstra’s Algorithm:
-
-Dijkstra's Algorithm is a greedy method used to find the shortest path from a source node to all other nodes in a weighted graph with non-negative weights.
-
-Steps:
-1. Initialize distances from source to all nodes as infinity, except for source=0.
-2. Mark all nodes as unvisited.
-3. Select the unvisited node with the smallest tentative distance.
-4. For the selected node, update the distances of its neighbors if a shorter path is found.
-5. Repeat until all nodes are visited or the shortest paths are finalized.
-
-Key Concepts:
-- The algorithm maintains a set of nodes for which the shortest path is known.
-- Uses a priority queue (or similar structure) to efficiently pick the next node.
-- Guarantees shortest path in graphs with non-negative weights.
-
-Applications:
-- Routing protocols (OSPF)
-- Pathfinding in maps and GPS systems
-- Network optimization and resource allocation
-
-This visualization demonstrates how the algorithm explores nodes step-by-step, updating shortest paths and eventually determining the minimum distance from the start node to all others.`}
-      </pre>
+        <b>Theory of Dijkstra’s Algorithm Experiment</b>
+        <br />
+        <br />
+        Dijkstra’s Algorithm finds the shortest path from a source node to all
+        other nodes in a weighted graph by relaxing edges and selecting the node
+        with the least tentative distance at each step.
+        <br />
+        <ul>
+          <li>Initialize distances (source 0, others ∞).</li>
+          <li>Pick the unvisited node with minimum distance.</li>
+          <li>Relax all its outgoing/incoming edges.</li>
+          <li>Repeat until all nodes are visited.</li>
+        </ul>
+        Applications include OSPF routing and GPS navigation.
+      </div>
     </div>
   );
 }
@@ -1228,6 +2042,4 @@ This experiment illustrates the practical working of a DFA, combining theoretica
     </div>
   );
 }
-
-
 export default experiments;
